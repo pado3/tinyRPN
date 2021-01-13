@@ -1,5 +1,5 @@
 # tinyRPN
-RPN four arithmetic calculator on ATtiny85
+RPN four arithmetic calculator on ATtiny85 & Arduino IDE
 <p></p>
 This is a tiny form factor, tiny program(sketch) and tiny function RPN (Reverse Polish Notation) calculator.<br />
 Its functions are +-*/ only.  Four (4) level stack, ENG (engineering) mode display and auto sleep are implemented.<br />
