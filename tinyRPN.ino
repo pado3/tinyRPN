@@ -1,5 +1,6 @@
 // tinyRPN : simple RPN caluculator on ATtiny85 by @pado3 
 // ver.1.0 2021/01/11
+// ver.1.1 2021/06/19 Fix BS issue. Fix FIX/SCI disp issue. Clarify vars & comments.
 // 
 // RPN calculator part:
 //  thanks to ARC by deetee aka zooxo https://github.com/zooxo/arc/find/master
@@ -24,7 +25,7 @@
 #define LCDadr 0x3e       // AQM0802 https://akizukidenshi.com/catalog/g/gK-06795/
 #define Vperi 3           // LCD and keypad powersource on 3=pin2
 #define AIN A2            // ADC input for keypad on A2=pin3
-#define POWER 1           // POWER(sleep) SW on 1=pin6(PCINT1)
+#define ONOFF 1           // sleep ON/OFF SW on 1=pin6(PCINT1) (rename at ver.1.1)
 #define KeyNum 18         // Number of keys
 int thres[KeyNum] = {     // threshold value of ADC derived by synapse's app
   // 18pc, R1=4.7k, E3
@@ -32,13 +33,13 @@ int thres[KeyNum] = {     // threshold value of ADC derived by synapse's app
   642,  720,  791,  849,  896,  932,  974, 1010
 };
 char KeyName[KeyNum] = "B/*-+#369852.0147_"; // B:BS, #:CHS, _:ENTER 
-byte contrast = 10;       // 0-63, tune for Vperi and so on
+byte contrast = 10;       // 0-63, tune for Vperi and so on (ex. LiPo:10, LR44x3-Di:15)
 int prevkey = -1;         // previous keycode, -1:open
 unsigned long lastt;      // sleep timer
 unsigned long zzz=120000; // sleep in 120sec non-operation
 float x=0.0,y=0.0,z=0.0,u=0.0,lastx=0.0;  // stack value in float
 boolean stacklift;        // stack lift flag, true with +-*/
-char s[STRLEN]="";        // input line characters
+char s[STRLEN+1]="";      // input line characters, +1 for BS issue (ver.1.1)
 
 void setup() {
   // set Vcc for periferals
@@ -47,11 +48,12 @@ void setup() {
   
   // set other pins and mode
   pinMode(AIN, INPUT);
-  pinMode(POWER, INPUT_PULLUP);
+  pinMode(ONOFF, INPUT_PULLUP);
   
   // LCD setup
+//  if(analogRead(AIN) < 1010)  contrast = analogRead(AIN) >> 4;  // memory over...
   TinyWireM.begin();
-  delay(100); // wait for Vperi powerup
+  delay(1000);  // wait for Vperi powerup, 100ms is too short for LR44 (ver.1.1)
   lcd_setup();
   lcd_clear();
   // Startup message
@@ -59,14 +61,14 @@ void setup() {
 //  lcd_printStr("tinyRPN");
   lcd_setCursor(0, 1);
   lcd_printStr("RESET");
-  delay(1000);
+  delay(500);
   printstack();
 }
 
 void loop() {
   int i;
   char key = KeyName[keypad()];
-  // calculation block is excerpted from ARC
+  // calculation block is based upon ARC
   if(('0'<=key)&&(key<='9')||(key=='.')) {
     if(strlen(s)<STRLEN) { // concatenate input character to string
       strcat(s," ");
@@ -167,9 +169,12 @@ void printstack() {     // print stack
 }
 
 void displaystack(int r, float v) { // display stack on row r
-  char st[STRLEN+1];
+//  char st[STRLEN+1];  // ver.1.0
+  char st[STRLEN*2];  // allocate twice for FIX/SCI disp issue on ver.1.1
 #if DISPFIX   // display FIX (simple but easily overflow)
   dtostrf(v, 8, 6, st);
+//  int i = strlen(st);   // debug on ver.1.1
+//  sprintf(st, "%d", i); // result:max.15 (why?) -> st[min.15] -> st[STRLEN*2]
 #elif DISPSCI // display scientist mode
   if((NEARZERO<abs(v) && abs(v)<1e-3) || 1e6<abs(v)) {
     if(v<0) {
@@ -186,7 +191,7 @@ void displaystack(int r, float v) { // display stack on row r
   int im, ii; // int mantissa index, int index (im*10^ii)
   ii = 3*(int)(log10(abs(v))/3);
 //  fm = v/pow(10.0, (float)ii);  // pow => loop save 486byte!
-  int i; float p=1;
+  int i; float p=1.0;
   for(i=0; i<abs(ii); i++)  p=p*10;
   if (0<=ii) {
     fm = v/p;
@@ -213,7 +218,7 @@ void displaystack(int r, float v) { // display stack on row r
   lcd_printStr(st);
 }
 
-// return pushed keypad number
+// return pushed keypad number, check sleep timer
 int keypad() {
   int d, i, k;
   lastt = millis();
@@ -228,7 +233,7 @@ int keypad() {
       }
     }
     if(k == -1) prevkey = -1;
-    if (zzz < millis() - lastt || digitalRead(POWER) == LOW) {
+    if (zzz < millis() - lastt || digitalRead(ONOFF) == LOW) {
       powerdown();
     }
   } while (k == prevkey);
@@ -284,7 +289,7 @@ void lcd_clear() {      // clear display
   lcd_cmd(0b00000001);
 }
 
-void lcd_setCursor(byte x, byte y) {  // 表示位置指定
+void lcd_setCursor(byte x, byte y) {  // set cursor position
   lcd_cmd(0x80 | (y * 0x40 + x));
 }
 
@@ -298,18 +303,17 @@ void lcd_lastdata(byte x) { // use in printStr
   TinyWireM.send(x);
 }
 
-void lcd_printStr(const char *s) {  // 文字の表示
+void lcd_printStr(const char *str) {  // print
   TinyWireM.beginTransmission(LCDadr);
-  while (*s) {
-    if (*(s + 1)) {
-      lcd_contdata(*s);
+  while (*str) {
+    if (*(str + 1)) {
+      lcd_contdata(*str);
     } else {
-      lcd_lastdata(*s);
+      lcd_lastdata(*str);
     }
-    s++;
+    str++;
   }
   TinyWireM.endTransmission();
 }
-// ここまでLCD関係の関数
 
 /* end of program */
